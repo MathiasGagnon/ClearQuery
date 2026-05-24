@@ -1,0 +1,34 @@
+Title: P1 — Jinja reference parsing: detect `{source.column}` tokens
+
+Goal
+- Implement the “understanding there’s a reference” layer:
+  - Parse a SQL template and identify references to local sources/columns written as `{source.column}`.
+- This ticket is ONLY detection + extraction (no behavior changes yet).
+
+Scope
+Backend
+- New helper module: `clear_query/sql/ref_parser.py`
+  - Function: `extract_source_column_refs(template: str) -> set[tuple[str, str]]`
+  - Rules:
+    - Detect exact pattern `{<source>.<column>}` where source/column are identifiers:
+      - Allowed chars: letters, digits, underscore (recommend) OR allow hyphen/spaces? (decide; recommend strict identifiers first)
+    - Ignore occurrences inside SQL strings/comments if feasible (optional for v1; document limitations)
+    - Return unique references
+  - Include a simple unit-tested regex-based implementation to start.
+
+- Add messaging command: `parse_sql_refs`
+  - Args: `query_template` (string)
+  - Returns: `data = {"refs": [{"source": "...", "column": "..."}]}`
+
+Acceptance Criteria
+- Given a query template containing `{sample_data.a}`, extraction returns `("sample_data","a")`.
+- Duplicate references are de-duplicated.
+- Malformed tokens are ignored or produce a clear error (pick one and document; recommend ignore malformed).
+
+Tests
+- Add `backend/tests/test_sql_ref_parser.py` covering:
+  - basic reference
+  - multiple refs
+  - duplicates
+  - malformed tokens not captured
+

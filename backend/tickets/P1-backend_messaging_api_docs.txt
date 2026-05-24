@@ -1,0 +1,84 @@
+Title: P1 — Backend messaging API documentation (for TS frontend integration)
+
+Goal
+- Produce clear, up-to-date documentation of the backend messaging “JSONL RPC” endpoints so the real TypeScript frontend can be implemented quickly and correctly.
+
+Deliverable
+- A single canonical doc file: `backend/MESSAGING_API.md`
+- It must be treated as source-of-truth for:
+  - transport/protocol rules (stdin/stdout JSON lines)
+  - request/response shapes
+  - every supported `command` and its args/response payload
+  - error semantics and examples
+
+Scope (Doc content)
+1) Protocol
+- One JSON request per line on stdin; one JSON response per line on stdout.
+- Request shape:
+  - `{"id": string, "command": string, "args": object}`
+- Response shape:
+  - success: `{"id": string|null, "success": true, "data": any}`
+  - error: `{"id": string|null, "success": false, "error": string}`
+- Notes:
+  - empty lines ignored
+  - per-request error isolation (process continues)
+  - UTF-8 / `ensure_ascii=false` behavior
+
+2) Common schemas
+- Define the JSON shape for:
+  - `WorkspacePayload` (what we return from most commands): `{name: string, sources: Source[]}`
+  - `Source` schema (include all fields currently supported in `clear_query.workspace.types.Source`):
+    - `name`, `type`, `path`, `query`, `csv_separator`, `csv_encoding`, `recipe`, `output_path`, `output_table`, ...
+  - `Recipe` schema: `{operations: RecipeOperation[]}`
+  - Each `RecipeOperation` variant currently supported:
+    - `filter_rows`, `rename_column`, `unique`, `sort`, `set_type`, `computed_column`, `replace_value`
+- Include at least one JSON example per schema.
+
+3) Endpoint list (commands)
+Document each command with:
+- Name + short description
+- Args (required/optional) with types
+- Success response `data` shape
+- Error conditions (common failure causes)
+- Example request + example response
+
+Current commands to include (verify against `clear_query.messaging`):
+- `create_workspace`
+- `load_workspace`
+- `get_preview`
+- `add_source`
+- `remove_source`
+- `add_recipe_step`
+- `update_recipe_step`
+- `remove_recipe_step`
+
+4) Behavioral notes for frontend authors
+- Workspace path rules:
+  - `create_workspace.workspace_path` is a directory; backend creates `workspace.json` inside (mention `.json` path compatibility if still supported).
+  - Relative source `path` is resolved relative to workspace file directory.
+- Preview semantics:
+  - `get_preview` applies recipe operations in order before returning rows.
+  - `limit` behavior (<=0 returns empty rows).
+- CSV parameters:
+  - `csv_separator`, `csv_encoding` stored per source and used during load.
+- Auto-inferred recipe note (if still enabled):
+  - `add_source` may auto-generate `set_type` operations when recipe empty/missing (document exact trigger conditions).
+
+5) “Known gaps” section
+- Explicitly list not-yet-implemented commands the TS frontend might want later (placeholders only; no promises), e.g.:
+  - `get_source_schema`, `validate_workspace`, `validate_recipe`, `materialize_workspace`, query execution, exports.
+
+Implementation tasks
+- Create `backend/MESSAGING_API.md` with the structure above.
+- Ensure examples match real behavior (copy/paste runnable examples that work with `clear_query.messaging`).
+- Add a short pointer in `backend/README.md` to the new doc.
+
+Acceptance criteria
+- A TS developer can implement a typed client without reading Python code.
+- All command names and arg keys match the backend exactly.
+- Examples are consistent with current payloads.
+
+Non-goals
+- No OpenAPI/FastAPI spec generation in this ticket (manual doc only).
+- No frontend code changes required.
+

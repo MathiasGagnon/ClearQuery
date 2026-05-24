@@ -1,0 +1,76 @@
+Title: P1 — Null handling operations (filter + replace)
+
+Goal
+- Provide first-class, explicit null/NA handling for datasets so users can:
+  - filter rows based on null/not-null
+  - replace nulls with a provided value
+  - optionally normalize “null-like” values (empty strings, "NA", "null", etc.) into real nulls
+
+Motivation
+- Current operations don’t express null semantics cleanly:
+  - `filter_rows` only supports comparison operators and will behave poorly for nulls.
+  - `replace_value` does exact-match replacement but doesn’t target null/NA reliably across pandas dtypes.
+
+Scope (Backend)
+1) New operation: `filter_nulls`
+- Shape:
+  - `{ "type": "filter_nulls", "column": "<col>", "is_null": true|false }`
+- Behavior:
+  - If `is_null=true`: keep rows where column is null/NA
+  - If `is_null=false`: keep rows where column is NOT null/NA
+  - Use pandas null detection (`pd.isna`) so it works for NaN/None/NaT
+  - Error if column missing
+
+2) New operation: `fill_nulls`
+- Shape:
+  - `{ "type": "fill_nulls", "column": "<col>", "value": <any> }`
+- Behavior:
+  - Replace null/NA values in the column with `value`
+  - Cast `value` to the column dtype using the same casting rules as `replace_value`
+  - If casting fails, return an error (ValueError)
+  - Error if column missing
+
+3) Optional (if needed for UX): New operation `normalize_nulls`
+- Shape:
+  - `{ "type": "normalize_nulls", "column": "<col>", "null_like": ["", "NA", "null"] }`
+- Behavior:
+  - For string/object columns, convert exact-match values in `null_like` to real nulls
+  - Apply trimming? (decide: exact match vs stripped match)
+  - Leave non-string columns unchanged (or error) — choose and document
+
+Implementation tasks
+- Update `clear_query/recipes/types.py`:
+  - Add Pydantic models for `filter_nulls`, `fill_nulls` (and `normalize_nulls` if included)
+  - Add them to the `RecipeOperation` union
+- Add operation implementations:
+  - `clear_query/recipes/operations/filter_nulls.py`
+  - `clear_query/recipes/operations/fill_nulls.py`
+  - (optional) `clear_query/recipes/operations/normalize_nulls.py`
+- Update `clear_query/recipes/engine.py` dispatch to handle new op types.
+- (Recommended) Update validation:
+  - Ensure referenced column exists before running (either in validator or per-op error messages).
+
+Messaging / UI tasks
+- Add the new operation types to the Tk step dropdown template list.
+- Add sample JSON templates:
+  - filter nulls: `{"type":"filter_nulls","column":"x","is_null":true}`
+  - fill nulls: `{"type":"fill_nulls","column":"x","value":0}`
+  - normalize nulls (if implemented): `{"type":"normalize_nulls","column":"x","null_like":["","NA","null"]}`
+
+Acceptance Criteria
+- `filter_nulls` correctly selects rows with NaN/None/NaT across numeric/string/datetime columns.
+- `fill_nulls` fills nulls and errors if `value` can’t be cast to the column dtype.
+- Operations are composable with existing recipe steps and work with `get_preview` and `materialize_workspace`.
+
+Tests
+- Add unit tests in `backend/tests/test_recipe_engine.py` (or a new file):
+  - filter_nulls keeps only null rows
+  - filter_nulls keeps only non-null rows
+  - fill_nulls fills numeric nulls with a numeric value (and casts from string "5" if allowed)
+  - fill_nulls raises on casting mismatch (e.g., fill int column with "abc")
+  - (optional) normalize_nulls converts specified string tokens to null
+
+Assumptions / Decisions to lock
+- “Null” means pandas null: `pd.isna(value) == True`.
+- `filter_rows` stays as-is; null-specific logic lives in null-specific ops (no operator extensions).
+

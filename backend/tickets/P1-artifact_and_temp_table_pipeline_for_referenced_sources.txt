@@ -1,0 +1,59 @@
+Title: P1 — Pipeline for referenced sources: parquet artifact + MariaDB temp table
+
+Goal
+- When a query references a local source, ensure it’s available in MariaDB as a temp table:
+  1) ensure up-to-date parquet artifact exists for that source
+  2) ensure a corresponding MariaDB temporary table exists (created from parquet)
+  3) track temp table names for the current run/session
+
+Scope
+Backend
+1) Artifact policy (parquet)
+- Artifact directory: `<workspace_dir>/artifact/`
+- Artifact filename: `{source_name}_{datetime}.parquet` (exact timestamp format to decide; recommend `YYYYMMDD_HHMMSS`)
+- “Up to date” definition (v1, deterministic and cheap):
+  - For file sources (csv/xlsx): compare source file mtime + size vs stored metadata
+  - For sql sources: out of scope (or always rebuild)
+- Store metadata alongside parquet:
+  - `{artifact_name}.meta.json` containing:
+    - source_name
+    - source type
+    - source path
+    - source file mtime/size (or hash if chosen)
+    - recipe hash (hash of recipe JSON)
+    - created_at
+
+2) Temporary table policy (MariaDB)
+- Temp table name MUST match artifact base name (without extension).
+- Creation rule:
+  - If temp table already created for this session, reuse it.
+  - Otherwise:
+    - infer schema via dtype->MariaDB mapping ticket (dependency)
+    - `CREATE TEMPORARY TABLE ...`
+    - bulk load rows from parquet into the temp table
+- Track created temp tables in memory:
+  - in messaging process: a dict keyed by `(workspace_path, source_name, artifact_id)` -> `temp_table_name`
+  - (v1 stateless alternative: return a plan + let frontend manage; but requirement says “keep track” so prefer in-process cache)
+
+3) Messaging command(s)
+- Add messaging command: `ensure_source_temp_tables`
+  - Args:
+    - `workspace_path`
+    - `connection` (host/port/database/user/password)
+    - `sources` (list[str]) OR derived from parsed refs in later ticket
+  - Returns:
+    - `data = {"tables": [{"source_name": "...", "artifact_path": "...", "temp_table": "..."}]}`
+
+Acceptance Criteria
+- If artifact missing or stale, it is created under `artifact/`.
+- A MariaDB temp table is created exactly once per session per artifact.
+- Returned mapping can be used to rewrite the SQL for execution.
+
+Tests
+- Unit tests for artifact freshness decision and naming.
+- Integration-ish tests for temp table creation with mocked DB layer (or patch SQLAlchemy engine + pandas insert).
+
+Dependencies
+- MariaDB type mapping ticket (dtype → SQL type).
+- A parquet reader already exists; bulk insert approach must be selected (executemany vs LOAD DATA LOCAL INFILE).
+

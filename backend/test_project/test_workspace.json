@@ -1,0 +1,14 @@
+{
+  "name": "test_workspace",
+  "sources": [
+    {
+      "name": "sample",
+      "type": "csv",
+      "path": "sample.csv",
+      "recipe": {
+        "operations": []
+      },
+      "output_path": "data/sample.parquet"
+    }
+  ]
+}

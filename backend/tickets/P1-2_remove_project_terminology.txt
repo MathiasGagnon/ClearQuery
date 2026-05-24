@@ -1,0 +1,21 @@
+Title: P1-2 — Remove “project” file terminology (workspace-only)
+
+Goal
+- Ensure docs, examples, and backend-facing interfaces refer only to `workspace.json`.
+- Prevent future drift where “project” and “workspace” are treated as different files/configs.
+
+Scope / Implementation
+- Update `project.md` examples and text to refer to `workspace.json` (folder can still be called “project/” if you like, but the config file is `workspace.json`).
+- Update ticket files under `backend/tickets/` to avoid referencing any other config filename.
+- Keep compatibility where already implemented:
+  - Allow the root key `"project"` in `workspace.json` (loader already maps it to `Workspace.name`), but document which key is recommended going forward.
+
+Acceptance Criteria
+- No references to any other config filename remain in repo docs/tickets (except maybe historical notes if explicitly desired).
+- The “main config file” is clearly and consistently named `workspace.json`.
+
+Tests
+- No code tests required, but run existing test suite after doc/ticket changes.
+
+Assumptions / Defaults
+- “Workspace” and “project” are synonyms conceptually, but we standardize on the **workspace** term and `workspace.json` filename.

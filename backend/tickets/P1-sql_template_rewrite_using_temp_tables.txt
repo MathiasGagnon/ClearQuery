@@ -1,0 +1,39 @@
+Title: P1 — SQL template rewrite: replace `{source.column}` with temp table references
+
+Goal
+- After temp tables are ensured, rewrite the SQL template so it references the actual MariaDB temp table + column names.
+
+Scope
+Backend
+- Input:
+  - original template string
+  - mapping: source_name -> temp_table_name
+  - mapping: (source_name, column) -> quoted identifier usage
+- Output:
+  - final SQL string ready to run
+
+Rules (v1)
+- Replace `{source.column}` with `` `temp_table_name`.`column` `` (quoted identifiers)
+- If `source_name` has no temp table mapping, return an error listing missing sources.
+- If column name is unknown (optional check using schema pane), either:
+  - error early (recommended), or
+  - allow and let MariaDB error later (document)
+
+Messaging command
+- `render_sql_with_sources`
+  - Args:
+    - `query_template` (string)
+    - `tables` mapping (object) e.g. `{"sample_data": "sample_data_20260524_101500"}`
+  - Returns:
+    - `data = {"sql": "<rendered sql>" }`
+
+Acceptance Criteria
+- Rendering is deterministic and safe (identifier quoting).
+- Missing table mapping produces clear error.
+
+Tests
+- Unit tests for rewriting:
+  - simple single token
+  - multiple tokens, duplicates
+  - missing mapping error
+

@@ -1,0 +1,42 @@
+Title: P1 — SQL UI: Export result checkbox (CSV/XLSX) with naming + options
+
+Goal
+- In the Tkinter SQL page, allow exporting the last query result to disk:
+  - checkbox “Export result”
+  - format: CSV or XLSX
+  - CSV options: encoding + separator
+  - output name: `{workspace_name}_{datetime}.{ext}` saved under `<workspace_dir>/outputs/` (or user-selected folder)
+
+Scope
+Backend
+- Extend `sql_preview` or add a new command `sql_execute` that returns:
+  - preview data (columns/dtypes/rows)
+  - and optionally triggers export
+- Recommended separation:
+  - Keep `sql_preview` as preview only
+  - Add `sql_execute`
+    - Args: connection, query, export options
+    - Returns: `data = { preview..., export_path?: str }`
+- Export implementation:
+  - CSV: `DataFrame.to_csv(sep=..., encoding=..., index=False)`
+  - XLSX: `DataFrame.to_excel(index=False)`
+  - Create `<workspace_dir>/outputs/` if missing
+  - Filename timestamp format consistent with artifacts
+
+Tkinter UI
+- Add controls to SQL tab:
+  - [ ] Export result
+  - format dropdown: CSV / XLSX
+  - if CSV: separator + encoding inputs
+  - optional: “Choose output folder…” vs default outputs dir
+- After execution, show export path in results panel.
+
+Acceptance Criteria
+- When enabled, running a query writes the output file with expected name and format.
+- CSV uses chosen separator/encoding.
+
+Tests
+- Backend test for export naming + writing (use temp dir + monkeypatch workspace path):
+  - CSV export writes file and is readable back
+  - XLSX export writes file
+

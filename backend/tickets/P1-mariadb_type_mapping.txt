@@ -1,0 +1,72 @@
+Title: P1 — MariaDB type mapping (pandas dtypes → SQL column types)
+
+Goal
+- Implement a deterministic mapping from the tool’s supported pandas dtypes to MariaDB column types.
+- Provide a reusable function used by future “upload temp table” / “create table” / “query execution” features.
+
+Motivation
+- To load materialized datasets into MariaDB, we must:
+  - infer or enforce a stable schema
+  - generate `CREATE TABLE` statements (or SQLAlchemy Table objects) with correct column types
+  - avoid ambiguous dtypes (`object`)
+
+Scope
+1) Define supported dtype contract (input)
+- This ticket assumes the upstream dtype restriction ticket is enforced:
+  - supported: pandas `string`, nullable `Int64`, `float64` (or `Float64` if chosen), nullable `boolean`, `datetime64[ns]`
+  - unsupported: `object`, categorical, tz-aware datetime, complex
+
+2) Implement mapping function
+- New module: `clear_query/mariadb/type_mapping.py`
+- Functions:
+  - `pandas_dtype_to_mariadb(dtype: Any) -> str`
+    - Returns a MariaDB SQL type string (e.g., `"BIGINT"`, `"DOUBLE"`, `"DATETIME"`, `"TINYINT(1)"`, `"TEXT"`)
+  - `dataframe_to_mariadb_schema(df: pd.DataFrame) -> list[tuple[str, str]]`
+    - Returns ordered `(column_name, sql_type)` list
+    - Column names preserved exactly (future follow-up: quoting/escaping)
+- Decisions to lock:
+  - Strings: default to `TEXT` vs `VARCHAR(255)` (recommended: `TEXT` initially to avoid truncation surprises)
+  - Ints: default to `BIGINT`
+  - Floats: default to `DOUBLE`
+  - Booleans: `TINYINT(1)` (MariaDB convention)
+  - Datetime: `DATETIME`
+
+3) Add “column name safety” helper (minimal)
+- Helper in same module:
+  - `quote_identifier(name: str) -> str` (backticks + escaping backticks)
+- This is required for generating DDL safely when users have spaces/reserved words.
+
+4) (Optional but recommended) Emit CREATE TABLE DDL
+- `render_create_table_sql(table: str, schema: list[tuple[str,str]], temporary: bool = True) -> str`
+- Use:
+  - `CREATE TEMPORARY TABLE` if `temporary=True`
+  - `IF NOT EXISTS`? (decide)
+
+Acceptance Criteria
+- For each supported dtype, mapping returns the expected MariaDB type string.
+- Unsupported dtype raises a clear error naming the dtype.
+- `dataframe_to_mariadb_schema()` returns a stable, ordered schema.
+- Identifier quoting produces valid SQL for tricky names like `select`, `my col`, and ``weird`name``.
+
+Tests
+- Add `backend/tests/test_mariadb_type_mapping.py`:
+  - Build small DataFrames for each dtype and assert mapping results:
+    - string -> TEXT
+    - Int64 -> BIGINT
+    - float -> DOUBLE
+    - boolean -> TINYINT(1)
+    - datetime64[ns] -> DATETIME
+  - Assert object dtype raises.
+  - Assert `quote_identifier()` outputs correctly escaped backticks.
+  - If CREATE TABLE renderer is included, assert the SQL contains expected fragments.
+
+Out of Scope (follow-up tickets)
+- Uploading data into MariaDB (bulk insert / LOAD DATA) and temp-table lifecycle.
+- Full SQLAlchemy integration for schema objects (ok to use raw strings for v1).
+- Charset/collation selection for text columns.
+- Decimal precision/scale policy (can be added later if needed).
+
+Assumptions / Defaults
+- Timezone-naive datetimes only.
+- “Text size” is not constrained in v1 (use TEXT).
+

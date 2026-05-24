@@ -1,0 +1,69 @@
+Title: P1 — Restrict supported dtypes to MariaDB-compatible set (no generic object)
+
+Goal
+- Ensure datasets/materialized outputs only use a controlled set of pandas dtypes that we can deterministically map to MariaDB column types.
+- Prevent ambiguous pandas `object` dtype from silently propagating (it’s not a reliable “type” for DB schemas).
+
+Motivation
+- Current previews/materialization can produce `object` dtype (mixed types, strings, nulls), which complicates:
+  - schema inference for temp tables
+  - reproducibility across runs
+  - validation and UX (users think they have “typed” data, but it’s actually arbitrary Python objects)
+
+Scope
+1) Define supported dtype set (tool-level contract)
+- Supported (example baseline):
+  - string: pandas `"string"` dtype
+  - int: pandas nullable `"Int64"`
+  - float: `float64` (or pandas nullable Float64 if chosen)
+  - boolean: pandas nullable `"boolean"` (prefer) or `bool`
+  - datetime: `datetime64[ns]` (timezone-naive; decide tz policy)
+- Explicitly disallow:
+  - `object`
+  - complex numbers
+  - categorical (unless explicitly supported)
+  - arbitrary extension dtypes not mapped to MariaDB
+
+2) Add dtype validation helper
+- New function (suggested location): `clear_query/dtypes/validator.py`
+  - `validate_supported_dtypes(df: pd.DataFrame) -> None`
+  - Raises a clear ValueError listing:
+    - column name
+    - dtype string
+    - recommended fix (e.g., “use set_type to string/int/float/datetime/boolean”)
+
+3) Enforce at key boundaries
+- Enforce after recipe execution (and before returning preview/materialization):
+  - In `get_preview`: validate dtypes after recipe applied (so UI sees errors early).
+  - In `materialize_workspace`: validate dtypes before writing parquet (so artifacts are safe for DB upload).
+- Decide enforcement level:
+  - Strict: error if any unsupported dtype exists.
+  - Relaxed: auto-coerce `object` to string (NOT recommended for v1 unless explicitly requested).
+
+4) Update type-casting operations
+- Ensure `set_type` produces the supported dtypes (e.g., string -> pandas `string`, int -> `Int64`, boolean -> `boolean`).
+- If needed, tweak `set_type` implementation to avoid producing raw `object` columns.
+
+5) Prepare for MariaDB mapping (follow-up ticket)
+- Document dtype->MariaDB mapping target types (even if the upload engine isn’t implemented yet):
+  - string -> VARCHAR/TEXT
+  - int -> BIGINT (or INT depending on range policy)
+  - float -> DOUBLE
+  - boolean -> TINYINT(1)
+  - datetime -> DATETIME
+
+Acceptance Criteria
+- `get_preview` returns a clear error when a source/recipe results in `object` dtype in any column.
+- `materialize_workspace` fails fast with the same error (no parquet written for invalid data).
+- Error message points users to the fix (`set_type` or cleaning steps).
+
+Tests
+- Add tests that:
+  - produce an `object` dtype column (e.g., mixed ints/strings) and assert preview/materialize fails with the expected message
+  - verify allowed dtypes pass
+  - ensure `set_type` converts from object-like input to supported dtype where possible
+
+Assumptions / Defaults
+- Prefer strict enforcement (no auto-conversion) to keep DB schema mapping deterministic.
+- Timezones: default to timezone-naive datetime; treat tz-aware as unsupported unless explicitly added.
+

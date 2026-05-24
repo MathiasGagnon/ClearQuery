@@ -1,0 +1,41 @@
+Title: P1 — SQL UI: Sources pane (tables + columns) in Tkinter
+
+Goal
+- In the Tkinter SQL page, add a left-side pane (like DBeaver) showing:
+  - Sources (treated as tables)
+  - Expand each source to see its columns (and dtypes)
+
+Scope
+Backend
+- Add messaging command: `get_sources_schema`
+  - Args: `workspace_path`
+  - Returns:
+    - `data = {"sources": [{"name": str, "type": str, "columns": [{"name": str, "dtype": str}], "artifact": {...optional...}}]}`
+  - Implementation approach:
+    - Load workspace
+    - For each source:
+      - Load DF schema cheaply:
+        - Prefer reading from existing parquet artifact if present and current (future ticket can improve)
+        - Otherwise for csv/xlsx: load dataframe and take `df.dtypes`
+        - For sql sources: schema is unknown unless executed; return empty columns or require query execution (decide and document)
+    - Do NOT apply recipe for schema unless that’s intended (decide; recommended: schema after recipe for “final table” view)
+
+Tkinter UI
+- Update `backend/tk_messaging_client.py` SQL tab:
+  - Split into left/right panes:
+    - Left: `ttk.Treeview` (“Sources”)
+      - top-level nodes: source names
+      - child nodes: columns as `col (dtype)`
+    - Right: query editor + results (existing)
+  - Add “Refresh sources” button that calls `get_sources_schema` and repopulates the tree.
+  - Optional UX:
+    - double-click a column inserts a token into query editor (e.g., `{source.column}` or `` `tmp_table`.`col` `` depending on stage)
+
+Acceptance Criteria
+- User can see all workspace sources and their columns/dtypes from the SQL page.
+- Refresh works after source add/remove or recipe changes (manual refresh is fine for v1).
+
+Tests
+- Backend unit test for `get_sources_schema` with a temp workspace + csv source:
+  - returns the expected source list and columns.
+

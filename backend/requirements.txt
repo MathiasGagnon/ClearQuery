@@ -1,0 +1,9 @@
+  typer
+  pydantic
+  pandas
+  pyarrow
+  jinja2
+  sqlalchemy
+  pymysql
+  openpyxl
+  pytest
