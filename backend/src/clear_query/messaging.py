@@ -152,6 +152,37 @@ def handle_sql_preview(args: dict[str, Any]) -> dict[str, Any]:
     return _df_preview(df, limit_int)
 
 
+def handle_get_sources_schema(args: dict[str, Any]) -> dict[str, Any]:
+    workspace_path = _require_arg(args, "workspace_path")
+
+    ws = load_workspace(workspace_path)
+    workspace_dir = Path(workspace_path).parent
+
+    sources_out: list[dict[str, Any]] = []
+    for source in ws.sources:
+        src_payload: dict[str, Any] = {
+            "name": source.name,
+            "type": source.type,
+        }
+
+        try:
+            df = load_source_dataframe(source, base_dir=workspace_dir)
+            if getattr(source, "recipe", None) is not None and getattr(source.recipe, "operations", None):
+                if len(source.recipe.operations) > 0:
+                    df = run_recipe(df, source.recipe)
+
+            cols = [{"name": str(c), "dtype": str(df[c].dtype)} for c in df.columns]
+            src_payload["columns"] = cols
+        except Exception as exc:
+            # Don’t fail the entire request if one source is broken.
+            src_payload["columns"] = []
+            src_payload["error"] = str(exc)
+
+        sources_out.append(src_payload)
+
+    return {"sources": sources_out}
+
+
 def handle_create_workspace(args: dict[str, Any]) -> dict[str, Any]:
     workspace_path = _require_arg(args, "workspace_path")
     name = _require_arg(args, "name")
@@ -352,6 +383,8 @@ def _dispatch(command: str, args: dict[str, Any]) -> dict[str, Any]:
         return handle_get_preview(args)
     if command == "sql_preview":
         return handle_sql_preview(args)
+    if command == "get_sources_schema":
+        return handle_get_sources_schema(args)
     if command == "create_workspace":
         return handle_create_workspace(args)
     if command == "add_source":

@@ -30,6 +30,12 @@ The backend messaging loop reads **one JSON object per line** from stdin and pri
 {"id":"preview-1","command":"get_preview","args":{"workspace_path":"WORKSPACE_PATH","source_name":"SOURCE_NAME","limit":5}}
 ```
 
+## 2b) List sources + columns (for SQL page)
+
+```json
+{"id":"schema-1","command":"get_sources_schema","args":{"workspace_path":"WORKSPACE_PATH"}}
+```
+
 ## 3) Preview edge cases
 
 Unknown source:

@@ -89,6 +89,7 @@ class MessagingClientApp(tk.Tk):
         self._sql_password_var = tk.StringVar(value="")
         self._sql_limit_var = tk.StringVar(value="50")
         self._last_sql_request_id: str | None = None
+        self._last_sources_request_id: str | None = None
 
         self._build_ui()
         self._refresh_form()
@@ -213,27 +214,50 @@ class MessagingClientApp(tk.Tk):
         ttk.Label(sql_top, text="Limit").grid(row=1, column=4, sticky="w", pady=(8, 0))
         ttk.Entry(sql_top, textvariable=self._sql_limit_var, width=8).grid(row=1, column=5, sticky="w", padx=(6, 0), pady=(8, 0))
 
-        sql_body = ttk.Frame(page_sql)
+        sql_body = ttk.Panedwindow(page_sql, orient=tk.HORIZONTAL)
         sql_body.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        query_frame = ttk.LabelFrame(sql_body, text="Query")
+        # Left pane: sources tree
+        sources_frame = ttk.Frame(sql_body)
+        sql_body.add(sources_frame, weight=1)
+
+        sources_header = ttk.Frame(sources_frame)
+        sources_header.pack(side=tk.TOP, fill=tk.X)
+        ttk.Label(sources_header, text="Sources").pack(side=tk.LEFT)
+        ttk.Button(sources_header, text="Refresh", command=self._refresh_sql_sources).pack(side=tk.RIGHT)
+
+        self._sql_sources_tree = ttk.Treeview(sources_frame)
+        self._sql_sources_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=(6, 0))
+        src_scroll = ttk.Scrollbar(sources_frame, orient=tk.VERTICAL, command=self._sql_sources_tree.yview)
+        src_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=(6, 0))
+        self._sql_sources_tree.configure(yscrollcommand=src_scroll.set)
+        self._sql_sources_tree.bind("<Double-1>", self._on_sql_sources_double_click)
+
+        # Right pane: query + results
+        right_sql = ttk.Frame(sql_body)
+        sql_body.add(right_sql, weight=3)
+
+        query_frame = ttk.LabelFrame(right_sql, text="Query")
         query_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
         self._sql_query_text = tk.Text(query_frame, height=10, wrap="none")
         self._sql_query_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         self._sql_query_text.insert("1.0", "SELECT 1 AS one;")
 
-        run_row = ttk.Frame(sql_body)
+        run_row = ttk.Frame(right_sql)
         run_row.pack(side=tk.TOP, fill=tk.X, pady=(8, 8))
         ttk.Button(run_row, text="Run preview", command=self._run_sql_preview).pack(side=tk.LEFT)
         ttk.Button(run_row, text="Clear", command=lambda: self._sql_query_text.delete("1.0", tk.END)).pack(side=tk.LEFT, padx=(6, 0))
 
-        sql_out = ttk.LabelFrame(sql_body, text="Results")
+        sql_out = ttk.LabelFrame(right_sql, text="Results")
         sql_out.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         self._sql_result_text = tk.Text(sql_out, wrap="none")
         self._sql_result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sql_scroll = ttk.Scrollbar(sql_out, orient=tk.VERTICAL, command=self._sql_result_text.yview)
         sql_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._sql_result_text.configure(yscrollcommand=sql_scroll.set)
+
+        # Initial population (no-op if backend not running)
+        self.after(250, self._refresh_sql_sources)
 
     def _build_form_widgets(self, parent: ttk.LabelFrame) -> None:
         # get_preview / remove_source / recipe step ops
@@ -647,6 +671,77 @@ class MessagingClientApp(tk.Tk):
         limit = int(self._sql_limit_var.get().strip() or "50")
         return {"id": req_id, "command": "sql_preview", "args": {"connection": conn, "query": query, "limit": limit}}
 
+    def _refresh_sql_sources(self) -> None:
+        ws = self._workspace_var.get().strip()
+        if not ws:
+            return
+
+        if self._backend is None:
+            return
+
+        req_id = f"ui-{self._next_id}"
+        self._next_id += 1
+        self._last_sources_request_id = req_id
+
+        req = {"id": req_id, "command": "get_sources_schema", "args": {"workspace_path": ws}}
+        proc = self._backend.proc
+        assert proc.stdin is not None
+        proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
+        proc.stdin.flush()
+
+    def _populate_sql_sources_tree(self, payload: dict[str, Any]) -> None:
+        self._sql_sources_tree.delete(*self._sql_sources_tree.get_children())
+
+        sources = payload.get("sources", [])
+        if not isinstance(sources, list):
+            return
+
+        for src in sources:
+            if not isinstance(src, dict):
+                continue
+            src_name = str(src.get("name", ""))
+            src_type = str(src.get("type", ""))
+            src_error = src.get("error")
+
+            label = f"{src_name} [{src_type}]"
+            src_node = self._sql_sources_tree.insert("", "end", text=label, values=("source", src_name, ""))
+
+            if src_error:
+                self._sql_sources_tree.insert(src_node, "end", text=f"[error] {src_error}", values=("error", src_name, ""))
+                continue
+
+            cols = src.get("columns", [])
+            if not isinstance(cols, list):
+                continue
+            for col in cols:
+                if not isinstance(col, dict):
+                    continue
+                col_name = str(col.get("name", ""))
+                dtype = str(col.get("dtype", ""))
+                self._sql_sources_tree.insert(
+                    src_node,
+                    "end",
+                    text=f"{col_name} ({dtype})",
+                    values=("column", src_name, col_name),
+                )
+
+    def _on_sql_sources_double_click(self, _event) -> None:
+        item = self._sql_sources_tree.focus()
+        if not item:
+            return
+        values = self._sql_sources_tree.item(item, "values")
+        if not values or len(values) < 3:
+            return
+        kind, src_name, col_name = values[0], values[1], values[2]
+        if kind != "column":
+            return
+        token = f"{{{src_name}.{col_name}}}"
+        try:
+            self._sql_query_text.insert(tk.INSERT, token)
+            self._sql_query_text.focus_set()
+        except Exception:
+            pass
+
     # -------------------------
     # Helpers
     # -------------------------
@@ -786,6 +881,17 @@ class MessagingClientApp(tk.Tk):
                                 ):
                                     self._sql_result_text.insert(tk.END, _pretty_json(obj) + "\n")
                                     self._sql_result_text.see(tk.END)
+                            except Exception:
+                                pass
+                            try:
+                                if (
+                                    isinstance(obj, dict)
+                                    and self._last_sources_request_id is not None
+                                    and obj.get("id") == self._last_sources_request_id
+                                    and obj.get("success") is True
+                                    and isinstance(obj.get("data"), dict)
+                                ):
+                                    self._populate_sql_sources_tree(obj["data"])
                             except Exception:
                                 pass
                         except Exception:
