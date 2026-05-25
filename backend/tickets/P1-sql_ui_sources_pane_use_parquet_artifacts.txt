@@ -1,0 +1,66 @@
+Title: P1 — SQL UI Sources pane: use parquet artifacts for schema (avoid reloading raw sources)
+
+Goal
+- Optimize the SQL page “Sources” pane so it does NOT load raw CSV/XLSX (or run SQL queries) to obtain column schema.
+- Instead, prefer reading from parquet artifacts (materialized outputs) which are faster and consistent with the “final table” the query will use.
+- This ticket assumes sources are only available trough the pane if the parquet file has been generated. If not, there should be a sync button over the pane to generate, if needed, the parquet files
+
+# TODO: Stop here if you reach: rethink the parquet, temp table, etc. synchronization strategy. Open a new ticket for that.
+
+Motivation
+- Current `get_sources_schema` loads each source DataFrame (and applies recipe) which can be slow for large files.
+- Parquet artifacts are:
+  - faster to read
+  - typed
+  - closer to what will be uploaded to MariaDB temp tables later
+
+Scope
+Backend
+1) Artifact selection logic for schema
+- Update `get_sources_schema` behavior:
+  - For each source, determine a parquet “artifact” path to use:
+    - If `source.output_path` exists and is current, prefer it
+    - Else if an artifact exists under `<workspace_dir>/artifact/` for this source and is current, prefer it
+    - Else fall back to loading the raw source (existing behavior), but mark result as `from_raw=true`
+- Define “current” (v1):
+  - For file-based sources: parquet mtime >= source file mtime AND recipe has not changed (recipe hash)
+  - For v1 simplification: parquet mtime >= source mtime may be acceptable; document limitations
+
+2) Metadata to support “current”
+- If not already present, write minimal metadata when materializing/parquet-writing:
+  - `artifact/<artifact>.meta.json` including:
+    - source_name
+    - source_path
+    - source_mtime
+    - recipe_hash
+    - created_at
+- If you prefer not to add meta yet, implement a minimal mtime-only check and create a follow-up ticket for metadata.
+
+3) Response enhancements
+- Extend `get_sources_schema` response per source:
+  - `columns`: unchanged
+  - `schema_source`: one of `parquet_output_path | parquet_artifact | raw_load`
+  - `parquet_path` when applicable
+  - `stale`: true/false when an artifact exists but is not current
+  - `error` for per-source failures (existing)
+
+Tkinter UI
+- Show an indicator in the sources tree label (optional but helpful):
+  - e.g., `sample_data [csv] (parquet)` or `(raw)` or `(stale)`
+- Keep “Refresh” as explicit action; no auto-refresh required.
+
+Acceptance Criteria
+- For a source with an existing, current parquet, `get_sources_schema` does not load the raw CSV/XLSX.
+- Sources pane refresh is noticeably faster for large CSV/XLSX once parquet exists.
+- Response clearly indicates where schema came from (`schema_source`).
+
+Tests
+- Add backend tests:
+  - When `output_path` parquet exists, schema is read from parquet (mock read_parquet or create small parquet).
+  - When parquet missing, falls back to raw load.
+  - When parquet stale, marks stale and falls back (or returns stale indicator, depending on chosen policy).
+
+Dependencies / Related
+- Leverages existing parquet read/write in `clear_query.datasets.parquet_store`.
+- May depend on (or spawn) artifact freshness policy from the “referenced sources pipeline” ticket.
+
