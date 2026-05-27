@@ -605,6 +605,13 @@ def _dispatch(command: str, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
+    # On Windows, sys.stdout/stdin default to the system locale (often cp1252).
+    # Force UTF-8 so accented characters survive the pipe to Node.js intact.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8")
+
     for raw_line in sys.stdin:
         line = raw_line.strip()
         if not line:

@@ -115,10 +115,19 @@ def render_create_table_sql(
     column_defs = []
     for col_name, sql_type in schema:
         quoted_col = quote_identifier(col_name)
-        column_defs.append(f"{quoted_col} {sql_type}")
+        # Append CHARACTER SET for text columns so they never inherit a latin1
+        # database default — accented characters would otherwise be garbled or lost.
+        if sql_type == "TEXT":
+            column_defs.append(f"{quoted_col} {sql_type} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        else:
+            column_defs.append(f"{quoted_col} {sql_type}")
 
     columns_sql = ",\n  ".join(column_defs)
 
-    sql = f"CREATE {table_keyword} {quoted_table} (\n  {columns_sql}\n);"
+    # Explicitly set the table charset so MariaDB never falls back to latin1.
+    sql = (
+        f"CREATE {table_keyword} {quoted_table} (\n  {columns_sql}\n)"
+        f" DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    )
 
     return sql

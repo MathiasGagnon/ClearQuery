@@ -22,21 +22,47 @@ export async function exportSqlResult(
     }
 
     // ── Options dialog ────────────────────────────────────────────────────────
-    const encoding = await vscode.window.showInputBox({
-        title: 'Export — CSV encoding',
-        value: 'utf-8',
-        placeHolder: 'e.g. utf-8 · latin-1 · cp1252',
-        validateInput: v => v.trim() ? undefined : 'Encoding cannot be empty',
-    });
-    if (encoding === undefined) { return; }   // Escape → abort
+    const encodingChoice = await vscode.window.showQuickPick(
+        [
+            {
+                label: 'utf-8-sig',
+                description: 'UTF-8 with BOM — opens correctly in Excel on Windows (recommended)',
+            },
+            {
+                label: 'utf-8',
+                description: 'UTF-8 without BOM — best for scripts, Linux, macOS',
+            },
+            {
+                label: 'latin-1',
+                description: 'Latin-1 / ISO-8859-1 — legacy Western European',
+            },
+            {
+                label: 'cp1252',
+                description: 'Windows-1252 — legacy Windows Western European',
+            },
+        ],
+        {
+            title: 'Export — CSV encoding',
+            placeHolder: 'Pick an encoding',
+        },
+    );
+    if (encodingChoice === undefined) { return; }   // Escape → abort
+    const encoding = encodingChoice.label;
 
-    const separator = await vscode.window.showInputBox({
-        title: 'Export — CSV separator',
-        value: ';',
-        placeHolder: 'e.g.  ;  or  ,',
-        validateInput: v => v ? undefined : 'Separator cannot be empty',
-    });
-    if (separator === undefined) { return; }   // Escape → abort
+    const separatorChoice = await vscode.window.showQuickPick(
+        [
+            { label: ';', description: 'Semicolon (default in French/European Excel)' },
+            { label: ',', description: 'Comma (default in English Excel)' },
+            { label: '\\t', description: 'Tab' },
+            { label: '|', description: 'Pipe' },
+        ],
+        {
+            title: 'Export — CSV separator',
+            placeHolder: 'Pick a separator',
+        },
+    );
+    if (separatorChoice === undefined) { return; }   // Escape → abort
+    const separator = separatorChoice.label === '\\t' ? '\t' : separatorChoice.label;
 
     // ── Export with progress ──────────────────────────────────────────────────
     let result: ExportPayload | undefined;

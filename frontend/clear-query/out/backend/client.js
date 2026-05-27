@@ -97,6 +97,11 @@ class BackendClient {
         const env = {
             ...process.env,
             PYTHONUNBUFFERED: '1',
+            // Force UTF-8 for all Python I/O regardless of the Windows system locale.
+            // Without this, sys.stdout defaults to cp1252 on Windows and Node.js
+            // (which reads the pipe as UTF-8) misinterprets accented characters.
+            PYTHONUTF8: '1',
+            PYTHONIOENCODING: 'utf-8',
             PYTHONPATH: pythonPaths.join(path.delimiter),
         };
         this.proc = (0, child_process_1.spawn)(this.pythonPath, ['-m', 'clear_query.messaging'], {
