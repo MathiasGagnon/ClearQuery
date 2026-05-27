@@ -1,7 +1,7 @@
 {
   "name": "clear-query",
-  "displayName": "clear_query",
-  "description": "",
+  "displayName": "ClearQuery",
+  "description": "Data workspace — load sources, write SQL, export results",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.120.0"
@@ -9,15 +9,202 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "clearquery",
+          "title": "ClearQuery",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "clearquery": [
+        {
+          "id": "clearquery.workspaceTree",
+          "name": "Workspace"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "clearquery.workspaceTree",
+        "contents": "No workspace open.\n[Open Workspace](command:clearquery.openWorkspace)\n[New Workspace](command:clearquery.newWorkspace)"
+      }
+    ],
     "commands": [
       {
-        "command": "clear-query.helloWorld",
-        "title": "Hello World"
+        "command": "clearquery.openWorkspace",
+        "title": "ClearQuery: Open Workspace",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "clearquery.newWorkspace",
+        "title": "ClearQuery: New Workspace",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "clearquery.restartBackend",
+        "title": "ClearQuery: Restart Backend"
+      },
+      {
+        "command": "clearquery.addSource",
+        "title": "ClearQuery: Add Source",
+        "icon": "$(add)"
+      },
+      {
+        "command": "clearquery.removeSource",
+        "title": "ClearQuery: Remove Source",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "clearquery.previewSource",
+        "title": "ClearQuery: Preview Source",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "clearquery.removeRecipeStep",
+        "title": "ClearQuery: Remove Recipe Step",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "clearquery.openSqlPanel",
+        "title": "ClearQuery: Open SQL Panel",
+        "icon": "$(table)"
+      },
+      {
+        "command": "clearquery.syncSources",
+        "title": "ClearQuery: Sync Sources",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "clearquery.addRecipeStep",
+        "title": "ClearQuery: Add Recipe Step",
+        "icon": "$(add)"
+      },
+      {
+        "command": "clearquery.editRecipeStep",
+        "title": "ClearQuery: Edit Recipe Step",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "clearquery.exportSqlResult",
+        "title": "ClearQuery: Export SQL Result",
+        "icon": "$(export)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "clearquery.openWorkspace",
+          "when": "view == clearquery.workspaceTree",
+          "group": "navigation"
+        },
+        {
+          "command": "clearquery.newWorkspace",
+          "when": "view == clearquery.workspaceTree",
+          "group": "navigation"
+        },
+        {
+          "command": "clearquery.addSource",
+          "when": "view == clearquery.workspaceTree",
+          "group": "navigation"
+        },
+        {
+          "command": "clearquery.openSqlPanel",
+          "when": "view == clearquery.workspaceTree",
+          "group": "navigation"
+        },
+        {
+          "command": "clearquery.syncSources",
+          "when": "view == clearquery.workspaceTree",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "clearquery.previewSource",
+          "when": "view == clearquery.workspaceTree && viewItem == source",
+          "group": "inline"
+        },
+        {
+          "command": "clearquery.addRecipeStep",
+          "when": "view == clearquery.workspaceTree && viewItem == source",
+          "group": "inline"
+        },
+        {
+          "command": "clearquery.removeSource",
+          "when": "view == clearquery.workspaceTree && viewItem == source",
+          "group": "1_actions"
+        },
+        {
+          "command": "clearquery.addRecipeStep",
+          "when": "view == clearquery.workspaceTree && viewItem == source",
+          "group": "1_actions"
+        },
+        {
+          "command": "clearquery.editRecipeStep",
+          "when": "view == clearquery.workspaceTree && viewItem == recipeStep",
+          "group": "inline"
+        },
+        {
+          "command": "clearquery.removeRecipeStep",
+          "when": "view == clearquery.workspaceTree && viewItem == recipeStep",
+          "group": "1_actions"
+        },
+        {
+          "command": "clearquery.editRecipeStep",
+          "when": "view == clearquery.workspaceTree && viewItem == recipeStep",
+          "group": "1_actions"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ClearQuery",
+      "properties": {
+        "clearquery.activeWorkspacePath": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Path to the active workspace.json. Set automatically by 'ClearQuery: Open Workspace'."
+        },
+        "clearquery.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Path to the Python executable used to run the ClearQuery backend."
+        },
+        "clearquery.connection.host": {
+          "type": "string",
+          "default": "localhost",
+          "description": "MariaDB host."
+        },
+        "clearquery.connection.port": {
+          "type": "number",
+          "default": 3306,
+          "description": "MariaDB port."
+        },
+        "clearquery.connection.database": {
+          "type": "string",
+          "default": "",
+          "description": "MariaDB database name."
+        },
+        "clearquery.connection.user": {
+          "type": "string",
+          "default": "",
+          "description": "MariaDB user."
+        },
+"clearquery.sql.defaultLimit": {
+          "type": "number",
+          "default": 500,
+          "description": "Default row limit for SQL preview queries."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

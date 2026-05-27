@@ -33,27 +33,51 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.requireClient = exports.getClient = void 0;
 exports.activate = activate;
 exports.deactivate = deactivate;
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(require("vscode"));
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
+const workspace_1 = require("./commands/workspace");
+Object.defineProperty(exports, "getClient", { enumerable: true, get: function () { return workspace_1.getClient; } });
+Object.defineProperty(exports, "requireClient", { enumerable: true, get: function () { return workspace_1.requireClient; } });
+const workspaceTree_1 = require("./views/workspaceTree");
+const sqlPanel_1 = require("./views/sqlPanel");
+const source_1 = require("./commands/source");
+const recipe_1 = require("./commands/recipe");
+const sync_1 = require("./commands/sync");
+const connection_1 = require("./commands/connection");
 function activate(context) {
-    // Use the console to output diagnostic information (console.log) and errors (console.error)
-    // This line of code will only be executed once when your extension is activated
-    console.log('Congratulations, your extension "clear-query" is now active!');
-    // The command has been defined in the package.json file
-    // Now provide the implementation of the command with registerCommand
-    // The commandId parameter must match the command field in package.json
-    const disposable = vscode.commands.registerCommand('clear-query.helloWorld', () => {
-        // The code you place here will be executed every time your command is executed
-        // Display a message box to the user
-        vscode.window.showInformationMessage('Hello World from clear_query!');
-    });
-    context.subscriptions.push(disposable);
+    // ── Status bar ────────────────────────────────────────────────────────
+    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    statusBar.command = 'clearquery.openWorkspace';
+    statusBar.text = '$(circle-slash) ClearQuery: no workspace';
+    statusBar.tooltip = 'Click to open a ClearQuery workspace';
+    statusBar.show();
+    context.subscriptions.push(statusBar);
+    // ── Workspace commands (open, new, restart) ───────────────────────────
+    (0, workspace_1.initWorkspaceCommands)(context, statusBar);
+    // ── Workspace tree (activity bar side panel) ──────────────────────────
+    const treeProvider = new workspaceTree_1.WorkspaceTreeProvider();
+    context.subscriptions.push(vscode.window.registerTreeDataProvider('clearquery.workspaceTree', treeProvider), treeProvider);
+    // ── Source, recipe & sync commands ───────────────────────────────────
+    (0, source_1.initSourceCommands)(context, treeProvider);
+    (0, recipe_1.initRecipeCommands)(context, treeProvider);
+    (0, sync_1.initSyncCommands)(context, treeProvider);
+    // ── SQL panel command ─────────────────────────────────────────────────
+    context.subscriptions.push(vscode.commands.registerCommand('clearquery.openSqlPanel', () => sqlPanel_1.SqlPanel.create(context.extensionUri)), vscode.commands.registerCommand('clearquery.exportSqlResult', () => sqlPanel_1.SqlPanel.requestExport()));
+    // ── Restart backend when python path changes ──────────────────────────
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+        if (e.affectsConfiguration('clearquery.pythonPath')) {
+            vscode.commands.executeCommand('clearquery.restartBackend');
+        }
+    }));
+    // ── Expose onDidChangeClient for future tickets ───────────────────────
+    context.subscriptions.push(workspace_1.onDidChangeClient);
+    // ── Auto-detect workspace.json in the open folder ─────────────────────
+    (0, workspace_1.autoDetectWorkspace)();
 }
-// This method is called when your extension is deactivated
-function deactivate() { }
+function deactivate() {
+    (0, workspace_1.getClient)()?.dispose();
+    (0, connection_1.clearPassword)();
+}
 //# sourceMappingURL=extension.js.map

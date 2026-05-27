@@ -1,26 +1,74 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import {
+    initWorkspaceCommands,
+    autoDetectWorkspace,
+    getClient,
+    requireClient,
+    onDidChangeClient,
+} from './commands/workspace';
+import { WorkspaceTreeProvider } from './views/workspaceTree';
+import { SqlPanel } from './views/sqlPanel';
+import { initSourceCommands } from './commands/source';
+import { initRecipeCommands } from './commands/recipe';
+import { initSyncCommands } from './commands/sync';
+import { clearPassword } from './commands/connection';
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+export { getClient, requireClient };
 
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "clear-query" is now active!');
+export function activate(context: vscode.ExtensionContext): void {
+    // ── Status bar ────────────────────────────────────────────────────────
+    const statusBar = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Left,
+        100,
+    );
+    statusBar.command = 'clearquery.openWorkspace';
+    statusBar.text = '$(circle-slash) ClearQuery: no workspace';
+    statusBar.tooltip = 'Click to open a ClearQuery workspace';
+    statusBar.show();
+    context.subscriptions.push(statusBar);
 
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('clear-query.helloWorld', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('Hello World from clear_query!');
-	});
+    // ── Workspace commands (open, new, restart) ───────────────────────────
+    initWorkspaceCommands(context, statusBar);
 
-	context.subscriptions.push(disposable);
+    // ── Workspace tree (activity bar side panel) ──────────────────────────
+    const treeProvider = new WorkspaceTreeProvider();
+    context.subscriptions.push(
+        vscode.window.registerTreeDataProvider('clearquery.workspaceTree', treeProvider),
+        treeProvider,
+    );
+
+    // ── Source, recipe & sync commands ───────────────────────────────────
+    initSourceCommands(context, treeProvider);
+    initRecipeCommands(context, treeProvider);
+    initSyncCommands(context, treeProvider);
+
+    // ── SQL panel command ─────────────────────────────────────────────────
+    context.subscriptions.push(
+        vscode.commands.registerCommand('clearquery.openSqlPanel', () =>
+            SqlPanel.create(context.extensionUri),
+        ),
+        vscode.commands.registerCommand('clearquery.exportSqlResult', () =>
+            SqlPanel.requestExport(),
+        ),
+    );
+
+    // ── Restart backend when python path changes ──────────────────────────
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration(e => {
+            if (e.affectsConfiguration('clearquery.pythonPath')) {
+                vscode.commands.executeCommand('clearquery.restartBackend');
+            }
+        }),
+    );
+
+    // ── Expose onDidChangeClient for future tickets ───────────────────────
+    context.subscriptions.push(onDidChangeClient);
+
+    // ── Auto-detect workspace.json in the open folder ─────────────────────
+    autoDetectWorkspace();
 }
 
-// This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate(): void {
+    getClient()?.dispose();
+    clearPassword();
+}
