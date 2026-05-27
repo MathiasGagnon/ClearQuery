@@ -17,8 +17,6 @@ def apply_set_type(df: pd.DataFrame, op: SetType) -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="raise").astype(float)
     elif dtype == "datetime":
         df[col] = pd.to_datetime(df[col], errors="raise")
-    elif dtype == "boolean":
-        df[col] = df[col].astype(bool)
     else:
         raise ValueError(f"Unsupported dtype: {dtype}")
 

@@ -33,6 +33,31 @@ def _parse_json_maybe(text: str) -> Any:
     return json.loads(text)
 
 
+class Tooltip:
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tooltip_window: tk.Toplevel | None = None
+        self.widget.bind("<Enter>", self._enter)
+        self.widget.bind("<Leave>", self._leave)
+
+    def _enter(self, _event: Any) -> None:
+        if self.tooltip_window is not None:
+            return
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() // 2
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, background="lightyellow", relief=tk.SOLID, borderwidth=1)
+        label.pack()
+
+    def _leave(self, _event: Any) -> None:
+        if self.tooltip_window is not None:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+
+
 @dataclass
 class BackendProcess:
     proc: subprocess.Popen[str]
@@ -51,6 +76,8 @@ class MessagingClientApp(tk.Tk):
         "add_recipe_step",
         "update_recipe_step",
         "remove_recipe_step",
+        "list_source_recipe",
+        "save_sources_to_parquet",
     ]
     STEP_OP_TYPES = [
         "filter_rows",
@@ -224,6 +251,9 @@ class MessagingClientApp(tk.Tk):
         sources_header = ttk.Frame(sources_frame)
         sources_header.pack(side=tk.TOP, fill=tk.X)
         ttk.Label(sources_header, text="Sources").pack(side=tk.LEFT)
+        sync_btn = ttk.Button(sources_header, text="Sync sources", command=self._save_sources_to_parquet)
+        sync_btn.pack(side=tk.RIGHT, padx=(0, 6))
+        Tooltip(sync_btn, "Saves all sources as parquet")
         ttk.Button(sources_header, text="Refresh", command=self._refresh_sql_sources).pack(side=tk.RIGHT)
 
         self._sql_sources_tree = ttk.Treeview(sources_frame)
@@ -231,6 +261,7 @@ class MessagingClientApp(tk.Tk):
         src_scroll = ttk.Scrollbar(sources_frame, orient=tk.VERTICAL, command=self._sql_sources_tree.yview)
         src_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=(6, 0))
         self._sql_sources_tree.configure(yscrollcommand=src_scroll.set)
+        self._sql_sources_tree.tag_configure("unavailable", foreground="gray")
         self._sql_sources_tree.bind("<Double-1>", self._on_sql_sources_double_click)
 
         # Right pane: query + results
@@ -246,15 +277,34 @@ class MessagingClientApp(tk.Tk):
         run_row = ttk.Frame(right_sql)
         run_row.pack(side=tk.TOP, fill=tk.X, pady=(8, 8))
         ttk.Button(run_row, text="Run preview", command=self._run_sql_preview).pack(side=tk.LEFT)
+        ttk.Button(run_row, text="Export", command=self._export_sql_result).pack(side=tk.LEFT, padx=(6, 0))
         ttk.Button(run_row, text="Clear", command=lambda: self._sql_query_text.delete("1.0", tk.END)).pack(side=tk.LEFT, padx=(6, 0))
 
         sql_out = ttk.LabelFrame(right_sql, text="Results")
         sql_out.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        self._sql_result_text = tk.Text(sql_out, wrap="none")
+
+        sql_out_tabs = ttk.Notebook(sql_out)
+        sql_out_tabs.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        # Raw tab
+        raw_tab = ttk.Frame(sql_out_tabs)
+        sql_out_tabs.add(raw_tab, text="Raw")
+        self._sql_result_text = tk.Text(raw_tab, wrap="none")
         self._sql_result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sql_scroll = ttk.Scrollbar(sql_out, orient=tk.VERTICAL, command=self._sql_result_text.yview)
+        sql_scroll = ttk.Scrollbar(raw_tab, orient=tk.VERTICAL, command=self._sql_result_text.yview)
         sql_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self._sql_result_text.configure(yscrollcommand=sql_scroll.set)
+
+        # Table tab
+        table_tab = ttk.Frame(sql_out_tabs)
+        sql_out_tabs.add(table_tab, text="Table")
+        self._sql_result_table = ttk.Treeview(table_tab, show="headings")
+        self._sql_result_table.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        table_scroll_y = ttk.Scrollbar(table_tab, orient=tk.VERTICAL, command=self._sql_result_table.yview)
+        table_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        table_scroll_x = ttk.Scrollbar(table_tab, orient=tk.HORIZONTAL, command=self._sql_result_table.xview)
+        table_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self._sql_result_table.configure(yscrollcommand=table_scroll_y.set, xscrollcommand=table_scroll_x.set)
 
         # Initial population (no-op if backend not running)
         self.after(250, self._refresh_sql_sources)
@@ -432,6 +482,35 @@ class MessagingClientApp(tk.Tk):
                 values.extend([""] * (len(cols) - len(values)))
             self._preview_tree.insert("", "end", values=values)
 
+    def _update_sql_result_table(self, columns: list[Any], rows: list[Any], dtypes: dict[str, Any] | None = None) -> None:
+        cols = [str(c) for c in (columns or [])]
+        if len(cols) > 200:
+            cols = cols[:200]
+
+        self._sql_result_table.delete(*self._sql_result_table.get_children())
+        self._sql_result_table["columns"] = cols
+
+        for c in cols:
+            dtype = None
+            if dtypes and c in dtypes:
+                dtype = dtypes.get(c)
+            header = f"{c} ({dtype})" if dtype else c
+            self._sql_result_table.heading(c, text=header)
+            self._sql_result_table.column(c, width=120, stretch=True, anchor="w")
+
+        if not rows:
+            return
+
+        max_rows = min(len(rows), 500)
+        for i in range(max_rows):
+            row = rows[i]
+            if not isinstance(row, (list, tuple)):
+                row = [row]
+            values = ["" if v is None else str(v) for v in list(row)[: len(cols)]]
+            if len(values) < len(cols):
+                values.extend([""] * (len(cols) - len(values)))
+            self._sql_result_table.insert("", "end", values=values)
+
     # -------------------------
     # Backend process lifecycle
     # -------------------------
@@ -584,6 +663,15 @@ class MessagingClientApp(tk.Tk):
             args["source_name"] = source_name
             args["step_index"] = int(self._step_index_var.get().strip() or "0")
 
+        elif cmd == "list_source_recipe":
+            source_name = self._source_name_var.get().strip()
+            if not source_name:
+                raise ValueError("source_name is required for list_source_recipe")
+            args["source_name"] = source_name
+
+        elif cmd == "save_sources_to_parquet":
+            pass
+
         else:
             raise ValueError(f"Unknown command: {cmd}")
 
@@ -689,6 +777,162 @@ class MessagingClientApp(tk.Tk):
         proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
         proc.stdin.flush()
 
+    def _export_sql_result(self) -> None:
+        """Export SQL query results with workspace snapshot."""
+        ws = self._workspace_var.get().strip()
+        if not ws:
+            messagebox.showerror("Error", "Workspace path is required")
+            return
+
+        query = self._sql_query_text.get("1.0", tk.END).strip()
+        if not query:
+            messagebox.showerror("Error", "Query is required")
+            return
+
+        host = self._sql_host_var.get().strip()
+        port_str = self._sql_port_var.get().strip()
+        database = self._sql_db_var.get().strip()
+        user = self._sql_user_var.get().strip()
+        password = self._sql_password_var.get()
+
+        if not all([host, port_str, database, user]):
+            messagebox.showerror("Error", "MariaDB connection details incomplete")
+            return
+
+        try:
+            port = int(port_str)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid port number")
+            return
+
+        # Prompt for encoding and separator
+        encoding_root = tk.Toplevel(self)
+        encoding_root.title("Export Options")
+        encoding_root.geometry("300x150")
+        encoding_root.resizable(False, False)
+
+        ttk.Label(encoding_root, text="Encoding:").grid(row=0, column=0, sticky="w", padx=10, pady=10)
+        encoding_var = tk.StringVar(value="utf-8")
+        ttk.Entry(encoding_root, textvariable=encoding_var, width=30).grid(row=0, column=1, sticky="we", padx=10, pady=10)
+
+        ttk.Label(encoding_root, text="Separator:").grid(row=1, column=0, sticky="w", padx=10, pady=10)
+        separator_var = tk.StringVar(value=";")
+        ttk.Entry(encoding_root, textvariable=separator_var, width=30).grid(row=1, column=1, sticky="we", padx=10, pady=10)
+
+        def do_export():
+            encoding_root.destroy()
+
+            if self._backend is None:
+                self._start_backend()
+            if self._backend is None:
+                return
+
+            req_id = f"ui-{self._next_id}"
+            self._next_id += 1
+
+            connection = {
+                "host": host,
+                "port": port,
+                "database": database,
+                "user": user,
+                "password": password,
+            }
+
+            req = {
+                "id": req_id,
+                "command": "export_sql_result",
+                "args": {
+                    "workspace_path": ws,
+                    "query": query,
+                    "connection": connection,
+                    "encoding": encoding_var.get() or "utf-8",
+                    "separator": separator_var.get() or ";",
+                },
+            }
+
+            proc = self._backend.proc
+            assert proc.stdin is not None
+            try:
+                proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
+                proc.stdin.flush()
+                self._sql_result_text.insert(tk.END, f"\n>>> {req['id']} export_sql_result\n")
+                self._sql_result_text.see(tk.END)
+            except Exception as exc:
+                messagebox.showerror("Error", f"Failed to export:\n{exc}")
+
+        ttk.Button(encoding_root, text="Export", command=do_export).grid(row=2, column=1, sticky="e", padx=10, pady=10)
+        encoding_root.grid_columnconfigure(1, weight=1)
+
+    def _save_sources_to_parquet(self) -> None:
+        ws = self._workspace_var.get().strip()
+        if not ws:
+            messagebox.showerror("Error", "Workspace path is required")
+            return
+
+        if self._backend is None:
+            self._start_backend()
+        if self._backend is None:
+            return
+
+        # Step 1: Save to parquet
+        req_id = f"ui-{self._next_id}"
+        self._next_id += 1
+
+        req = {"id": req_id, "command": "save_sources_to_parquet", "args": {"workspace_path": ws}}
+        proc = self._backend.proc
+        assert proc.stdin is not None
+        try:
+            proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+            self._sql_result_text.insert(tk.END, f"\n>>> {req['id']} save_sources_to_parquet\n")
+            self._sql_result_text.see(tk.END)
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to save sources:\n{exc}")
+            return
+
+        # Step 2: Sync to temp tables (if MariaDB connection is available)
+        host = self._sql_host_var.get().strip()
+        port_str = self._sql_port_var.get().strip()
+        database = self._sql_db_var.get().strip()
+        user = self._sql_user_var.get().strip()
+        password = self._sql_password_var.get()
+
+        if not all([host, port_str, database, user]):
+            # Skip temp table sync if connection details are incomplete
+            messagebox.showinfo("Info", "Parquet files saved. MariaDB connection details incomplete - temp tables not synced.")
+            return
+
+        try:
+            port = int(port_str)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid port number")
+            return
+
+        req_id2 = f"ui-{self._next_id}"
+        self._next_id += 1
+
+        connection = {
+            "host": host,
+            "port": port,
+            "database": database,
+            "user": user,
+            "password": password,
+        }
+
+        req2 = {
+            "id": req_id2,
+            "command": "sync_sources_to_temp_tables",
+            "args": {"workspace_path": ws, "connection": connection},
+        }
+
+        try:
+            proc.stdin.write(json.dumps(req2, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+            self._sql_result_text.insert(tk.END, f"\n>>> {req2['id']} sync_sources_to_temp_tables\n")
+            self._sql_result_text.see(tk.END)
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to sync sources to temp tables:\n{exc}")
+
     def _populate_sql_sources_tree(self, payload: dict[str, Any]) -> None:
         self._sql_sources_tree.delete(*self._sql_sources_tree.get_children())
 
@@ -702,9 +946,23 @@ class MessagingClientApp(tk.Tk):
             src_name = str(src.get("name", ""))
             src_type = str(src.get("type", ""))
             src_error = src.get("error")
+            schema_source = src.get("schema_source", "")
 
+            # Check if parquet artifact is available
+            has_artifact = schema_source == "parquet_artifact"
+
+            # Gray out sources without artifacts
+            tag = "unavailable" if not has_artifact else ""
             label = f"{src_name} [{src_type}]"
-            src_node = self._sql_sources_tree.insert("", "end", text=label, values=("source", src_name, ""))
+            if not has_artifact:
+                label += " (sync needed)"
+
+            src_node = self._sql_sources_tree.insert("", "end", text=label, values=("source", src_name, ""), tags=(tag,))
+
+            # If no artifact, show message instead of columns
+            if not has_artifact:
+                self._sql_sources_tree.insert(src_node, "end", text="[no parquet artifact - use Sync sources button]", values=("info", src_name, ""), tags=(tag,))
+                continue
 
             if src_error:
                 self._sql_sources_tree.insert(src_node, "end", text=f"[error] {src_error}", values=("error", src_name, ""))
@@ -881,6 +1139,18 @@ class MessagingClientApp(tk.Tk):
                                 ):
                                     self._sql_result_text.insert(tk.END, _pretty_json(obj) + "\n")
                                     self._sql_result_text.see(tk.END)
+                                    # Also populate table view if results have columns and rows
+                                    if (
+                                        obj.get("success") is True
+                                        and isinstance(obj.get("data"), dict)
+                                        and "columns" in obj["data"]
+                                        and "rows" in obj["data"]
+                                    ):
+                                        self._update_sql_result_table(
+                                            obj["data"].get("columns", []),
+                                            obj["data"].get("rows", []),
+                                            obj["data"].get("dtypes", None),
+                                        )
                             except Exception:
                                 pass
                             try:
