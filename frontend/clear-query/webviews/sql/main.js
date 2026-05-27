@@ -221,7 +221,7 @@
             padding: 1px 4px;
             border-radius: 2px;
         }
-        #btn-export, #btn-clear {
+        #btn-export, #btn-clear, #btn-stop {
             background: var(--vscode-button-secondaryBackground, rgba(128,128,128,0.15));
             color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
         }
@@ -229,6 +229,18 @@
             background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.25));
         }
         #btn-export:disabled { opacity: 0.4; cursor: not-allowed; }
+        #btn-stop {
+            display: none;
+            background: var(--vscode-inputValidation-errorBackground, rgba(90,29,29,0.6));
+            color: var(--vscode-inputValidation-errorForeground, #f48771);
+        }
+        #btn-stop:hover {
+            background: var(--vscode-inputValidation-errorBorder, #be1100);
+            color: #fff;
+        }
+        .running #btn-run    { opacity: 0.4; pointer-events: none; }
+        .running #btn-stop   { display: flex; }
+        .running #btn-export { opacity: 0.4; pointer-events: none; }
 
         /* Results area */
         .results-pane {
@@ -375,8 +387,9 @@
                     <textarea id="sql-editor"
                         placeholder="-- Write your SQL query here&#10;-- Double-click a column on the left to insert it"
                         spellcheck="false"></textarea>
-                    <div class="btn-row">
+                    <div class="btn-row" id="btn-row">
                         <button id="btn-run">▶ Run <kbd>Ctrl+Enter</kbd></button>
+                        <button id="btn-stop" title="Stop running query">◼ Stop</button>
                         <button id="btn-export" title="Export results as CSV (Ctrl+Shift+E)">⬇ Export</button>
                         <button id="btn-clear">✕ Clear</button>
                     </div>
@@ -422,6 +435,7 @@
         });
 
         document.getElementById('btn-run').addEventListener('click', runQuery);
+        document.getElementById('btn-stop').addEventListener('click', stopQuery);
         document.getElementById('btn-export').addEventListener('click', requestExport);
 
         document.getElementById('btn-clear').addEventListener('click', () => {
@@ -459,6 +473,12 @@
         const query = elSqlEditor.value.trim();
         if (!query) { return; }
         vscode.postMessage({ type: 'export', query });
+    }
+
+    function stopQuery() {
+        setRunning(false);
+        showResultsIdle();
+        vscode.postMessage({ type: 'cancelQuery' });
     }
 
     function setTab(tab) {
@@ -592,23 +612,32 @@
     // ═════════════════════════════════════════════════════════════════════════
     // RESULTS
     // ═════════════════════════════════════════════════════════════════════════
+
+    function setRunning(on) {
+        document.getElementById('btn-row').classList.toggle('running', on);
+    }
+
     function showResultsIdle() {
+        setRunning(false);
         elRowCount.textContent = '';
         elResultsBody.innerHTML = `<div class="state">Run a query to see results.</div>`;
     }
 
     function showResultsLoading() {
+        setRunning(true);
         elRowCount.textContent = '';
         elResultsBody.innerHTML = `
             <div class="state"><div class="spinner"></div>Running…</div>`;
     }
 
     function showResultsError(msg) {
+        setRunning(false);
         elRowCount.textContent = '';
         elResultsBody.innerHTML = `<div class="error-banner">⚠ ${esc(msg)}</div>`;
     }
 
     function showResults(columns, dtypes, rows) {
+        setRunning(false);
         lastResults = { columns, dtypes, rows };
         elRowCount.textContent = `${rows.length} row${rows.length !== 1 ? 's' : ''}`;
         renderActiveTab();

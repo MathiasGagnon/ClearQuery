@@ -61,6 +61,7 @@ class BackendClient {
     restartCount = 0;
     maxRestarts = 3;
     disposed = false;
+    _cancelling = false;
     constructor(workspacePath, pythonPath, extensionPath) {
         this.workspacePath = workspacePath;
         this.pythonPath = pythonPath;
@@ -157,6 +158,14 @@ class BackendClient {
     }
     onExit(code) {
         this.rejectAll(new BackendError('Backend process exited unexpectedly'));
+        // User-initiated cancel: restart cleanly without counting it as a crash
+        if (this._cancelling) {
+            this._cancelling = false;
+            this.restartCount = 0;
+            this.setStatus('starting');
+            setTimeout(() => this.start(), 500);
+            return;
+        }
         if (this.restartCount < this.maxRestarts) {
             this.restartCount++;
             this.setStatus('starting');
@@ -195,8 +204,8 @@ class BackendClient {
             const id = String(this.nextId++);
             const timer = setTimeout(() => {
                 this.pending.delete(id);
-                reject(new BackendError(`Request "${command}" timed out after 30s`));
-            }, 30_000);
+                reject(new BackendError(`Request "${command}" timed out after 15 minutes`));
+            }, 15 * 60 * 1000);
             this.pending.set(id, {
                 resolve: resolve,
                 reject,
@@ -205,6 +214,15 @@ class BackendClient {
             const req = { id, command, args };
             this.proc.stdin.write(JSON.stringify(req) + '\n');
         });
+    }
+    cancelQuery() {
+        this._cancelling = true;
+        this.rejectAll(new BackendError('Query cancelled'));
+        try {
+            this.proc?.kill('SIGTERM');
+        }
+        catch { /* ignore */ }
+        // onExit fires next and restarts cleanly because _cancelling is set
     }
     dispose() {
         this.disposed = true;

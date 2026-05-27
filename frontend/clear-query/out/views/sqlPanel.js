@@ -98,6 +98,15 @@ class SqlPanel {
                 }
                 break;
             }
+            case 'cancelQuery': {
+                const client = (0, workspace_1.getClient)();
+                if (client) {
+                    client.cancelQuery();
+                }
+                // Webview already shows idle — just confirm with an idle message
+                this._panel.webview.postMessage({ type: 'idle' });
+                break;
+            }
         }
     }
     // ── Config ────────────────────────────────────────────────────────────────

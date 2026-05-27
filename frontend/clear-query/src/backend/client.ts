@@ -36,6 +36,7 @@ export class BackendClient implements vscode.Disposable {
     private restartCount = 0;
     private readonly maxRestarts = 3;
     private disposed = false;
+    private _cancelling = false;
 
     constructor(
         private readonly workspacePath: string,
@@ -145,6 +146,15 @@ export class BackendClient implements vscode.Disposable {
     private onExit(code: number | null): void {
         this.rejectAll(new BackendError('Backend process exited unexpectedly'));
 
+        // User-initiated cancel: restart cleanly without counting it as a crash
+        if (this._cancelling) {
+            this._cancelling = false;
+            this.restartCount = 0;
+            this.setStatus('starting');
+            setTimeout(() => this.start(), 500);
+            return;
+        }
+
         if (this.restartCount < this.maxRestarts) {
             this.restartCount++;
             this.setStatus('starting');
@@ -191,8 +201,8 @@ export class BackendClient implements vscode.Disposable {
 
             const timer = setTimeout(() => {
                 this.pending.delete(id);
-                reject(new BackendError(`Request "${command}" timed out after 30s`));
-            }, 30_000);
+                reject(new BackendError(`Request "${command}" timed out after 15 minutes`));
+            }, 15 * 60 * 1000);
 
             this.pending.set(id, {
                 resolve: resolve as (v: unknown) => void,
@@ -203,6 +213,13 @@ export class BackendClient implements vscode.Disposable {
             const req: BackendRequest = { id, command, args };
             this.proc.stdin.write(JSON.stringify(req) + '\n');
         });
+    }
+
+    cancelQuery(): void {
+        this._cancelling = true;
+        this.rejectAll(new BackendError('Query cancelled'));
+        try { this.proc?.kill('SIGTERM'); } catch { /* ignore */ }
+        // onExit fires next and restarts cleanly because _cancelling is set
     }
 
     dispose(): void {
