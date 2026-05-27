@@ -83,12 +83,20 @@ class BackendClient {
         const bundled = path.join(this.extensionPath, 'backend', 'src');
         const devPath = path.join(this.extensionPath, '..', '..', 'backend', 'src');
         const backendSrc = fs.existsSync(bundled) ? bundled : devPath;
+        // Vendored dependencies: bundled at extensionPath/backend/vendor
+        // In dev the venv already has the packages, so vendor is optional.
+        const vendorPath = path.join(this.extensionPath, 'backend', 'vendor');
+        const pythonPaths = [backendSrc];
+        if (fs.existsSync(vendorPath)) {
+            pythonPaths.push(vendorPath);
+        }
+        if (process.env.PYTHONPATH) {
+            pythonPaths.push(process.env.PYTHONPATH);
+        }
         const env = {
             ...process.env,
             PYTHONUNBUFFERED: '1',
-            PYTHONPATH: process.env.PYTHONPATH
-                ? `${backendSrc}${path.delimiter}${process.env.PYTHONPATH}`
-                : backendSrc,
+            PYTHONPATH: pythonPaths.join(path.delimiter),
         };
         this.proc = (0, child_process_1.spawn)(this.pythonPath, ['-m', 'clear_query.messaging'], {
             cwd: path.dirname(this.workspacePath),

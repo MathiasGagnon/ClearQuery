@@ -207,12 +207,14 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run copy-backend && npm run vendor && npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "copy-backend": "node -e \"const fs=require('fs'),path=require('path');const src=path.join(__dirname,'..','..','backend','src','clear_query');const dst=path.join(__dirname,'backend','src','clear_query');fs.rmSync(dst,{recursive:true,force:true});fs.cpSync(src,dst,{recursive:true});console.log('backend source copied');\"",
+    "vendor": "pip install --target backend/vendor -r ../../backend/requirements-prod.txt --quiet && echo vendor installed"
   },
   "devDependencies": {
     "@types/vscode": "^1.120.0",

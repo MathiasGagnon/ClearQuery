@@ -1,3 +1,4 @@
+# Dev / build artifacts
 .vscode/**
 .vscode-test/**
 src/**
@@ -9,3 +10,9 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+# Vendor noise — strip test suites and unnecessary dist files to keep the vsix smaller
+backend/vendor/**/tests/**
+backend/vendor/**/test/**
+backend/vendor/**/__pycache__/**
+backend/vendor/**/*.dist-info/RECORD

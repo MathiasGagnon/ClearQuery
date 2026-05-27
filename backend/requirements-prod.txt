@@ -1,0 +1,8 @@
+pydantic
+pandas
+pyarrow
+jinja2
+sqlalchemy
+pymysql
+openpyxl
+typer
