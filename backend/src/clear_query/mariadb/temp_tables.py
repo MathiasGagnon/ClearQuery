@@ -76,7 +76,7 @@ class MariaDBConnection:
             config = ParquetReadInput(file_path=parquet_path)
             df = read_parquet(config)
             schema = dataframe_to_mariadb_schema(df)
-            create_sql = render_create_table_sql(source_name, schema, temporary=False)
+            create_sql = render_create_table_sql(source_name, schema)
             return create_sql
         except Exception as exc:
             raise ValueError(f"Failed to generate DDL for source '{source_name}': {exc}") from exc
